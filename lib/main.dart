@@ -23,59 +23,47 @@ class ProbHome extends StatefulWidget {
 }
 
 class _ProbHomeState extends State<ProbHome> {
-  // Dropdown ranges for counts. Adjust as you like.
-  static const int maxCount = 20;
-  final List<int> countOptions = List.generate(maxCount + 1, (i) => i); // 0..20
+  // Fixed: always exactly 3 tiles of (0 or 1)
+  static const int fixedCount01 = 3;
 
-  int? count01; // tiles that are 0 or 1
-  int? count02; // tiles that are 0 or 2
-  int? count12; // tiles that are 1 or 2
-  int? target; // minimum target
+  // Bounds requested
+  static const int maxCount02 = 2; // (0 or 2): 0..2
+  static const int maxCount12Light = 4; // (1 or 2) Light: 0..4
+  static const int maxCount12Dark = 3; // (1 or 2) Dark: 0..3
+  static const int minTarget = 1;
+  static const int maxTarget = 20;
 
-  double? probability;
+  final List<int> count02Options = List.generate(maxCount02 + 1, (i) => i);
+  final List<int> count12LightOptions = List.generate(maxCount12Light + 1, (i) => i);
+  final List<int> count12DarkOptions = List.generate(maxCount12Dark + 1, (i) => i);
+  final List<int> targetOptions = List.generate(maxTarget - minTarget + 1, (i) => minTarget + i);
 
-  int _maxPossibleSum(int a, int b, int c) => a * 1 + b * 2 + c * 2;
+  // Selections (give sensible defaults to avoid null handling)
+  int count02 = 0;
+  int count12Light = 0;
+  int count12Dark = 0;
+  int target = 1;
 
-  int _minPossibleSum(int a, int b, int c) => a * 0 + b * 0 + c * 1;
+  double get probability => probabilityAtLeastTarget(
+    count01: fixedCount01,
+    count02: count02,
+    count12: count12Light + count12Dark,
+    target: target,
+  );
 
-  List<int> _targetOptionsForCurrentCounts() {
-    if (count01 == null || count02 == null || count12 == null) {
-      // fallback range if not selected yet
-      return List.generate(41, (i) => i); // 0..40
-    }
-    final a = count01!, b = count02!, c = count12!;
-    final minS = _minPossibleSum(a, b, c);
-    final maxS = _maxPossibleSum(a, b, c);
-    return List.generate(maxS - minS + 1, (i) => minS + i);
-  }
+  int get minPossibleSum => fixedCount01 * 0 + count02 * 0 + (count12Light + count12Dark) * 1;
 
-  void _recomputeIfReady() {
-    if (count01 == null || count02 == null || count12 == null || target == null) {
-      setState(() => probability = null);
-      return;
-    }
-
-    final a = count01!;
-    final b = count02!;
-    final c = count12!;
-    final t = target!;
-
-    final p = probabilityAtLeastTarget(count01: a, count02: b, count12: c, target: t);
-
-    setState(() => probability = p);
-  }
+  int get maxPossibleSum => fixedCount01 * 1 + count02 * 2 + (count12Light + count12Dark) * 2;
 
   /// Exact probability that total >= target
-  /// Tiles are independent and each is 50/50 between its two outcomes:
-  /// - 0/1, 0/2, 1/2
+  /// (independent tiles, each 50/50 between its two outcomes)
   double probabilityAtLeastTarget({
-    required int count01,
-    required int count02,
-    required int count12,
+    required int count01, // tiles: {0,1}
+    required int count02, // tiles: {0,2}
+    required int count12, // tiles: {1,2}
     required int target,
   }) {
-    // dp[sum] = probability of achieving exactly `sum`
-    List<double> dp = [1.0];
+    List<double> dp = [1.0]; // dp[sum] = P(total == sum)
 
     void convolveFairTwoPoint(int v1, int v2, int times) {
       for (int k = 0; k < times; k++) {
@@ -89,11 +77,8 @@ class _ProbHomeState extends State<ProbHome> {
       }
     }
 
-    // Add count01 tiles of {0,1}
     convolveFairTwoPoint(0, 1, count01);
-    // Add count02 tiles of {0,2}
     convolveFairTwoPoint(0, 2, count02);
-    // Add count12 tiles of {1,2}
     convolveFairTwoPoint(1, 2, count12);
 
     double success = 0.0;
@@ -105,134 +90,114 @@ class _ProbHomeState extends State<ProbHome> {
 
   Widget _dropdown({
     required String label,
-    required int? value,
+    required int value,
     required List<int> items,
-    required ValueChanged<int?> onChanged,
+    required ValueChanged<int> onChanged,
   }) {
     return DropdownButtonFormField<int>(
       initialValue: value,
       decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
       items: items.map((n) => DropdownMenuItem<int>(value: n, child: Text('$n'))).toList(),
       onChanged: (v) {
+        if (v == null) return;
         onChanged(v);
-        _recomputeIfReady();
       },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final targets = _targetOptionsForCurrentCounts();
+    // Optional: keep target within physical bounds if user picks something impossible
+    final clampedTarget = target.clamp(1, maxTarget);
+    if (clampedTarget != target) {
+      // rare, but keep state coherent
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() => target = clampedTarget);
+      });
+    }
 
-    final statusText = () {
-      if (probability == null) return 'Select all 4 values to compute probability.';
-      return 'Probability of success: ${(probability! * 100).toStringAsFixed(2)}%';
-    }();
-
-    final hintText = () {
-      if (count01 == null || count02 == null || count12 == null) return '';
-      final a = count01!, b = count02!, c = count12!;
-      final minS = _minPossibleSum(a, b, c);
-      final maxS = _maxPossibleSum(a, b, c);
-      return 'Possible total range: $minS … $maxS';
-    }();
+    // Compute once for display
+    final p = probability;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tile Success Probability')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _dropdown(
-                    label: 'Count of (0 or 1)',
-                    value: count01,
-                    items: countOptions,
-                    onChanged: (v) {
-                      setState(() {
-                        count01 = v;
-                        // If target becomes invalid, clear it.
-                        if (target != null && count01 != null && count02 != null && count12 != null) {
-                          final minS = _minPossibleSum(count01!, count02!, count12!);
-                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
-                          if (target! < minS || target! > maxS) target = null;
-                        }
-                      });
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _dropdown(
-                    label: 'Count of (0 or 2)',
-                    value: count02,
-                    items: countOptions,
-                    onChanged: (v) {
-                      setState(() {
-                        count02 = v;
-                        if (target != null && count01 != null && count02 != null && count12 != null) {
-                          final minS = _minPossibleSum(count01!, count02!, count12!);
-                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
-                          if (target! < minS || target! > maxS) target = null;
-                        }
-                      });
-                    },
-                  ),
-                ),
-              ],
+            // Show fixed tiles clearly
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: const [_FixedChip(label: '0/1 tiles', valueText: '3 (fixed)')],
             ),
             const SizedBox(height: 12),
+
             Row(
               children: [
                 Expanded(
                   child: _dropdown(
-                    label: 'Count of (1 or 2)',
-                    value: count12,
-                    items: countOptions,
-                    onChanged: (v) {
-                      setState(() {
-                        count12 = v;
-                        if (target != null && count01 != null && count02 != null && count12 != null) {
-                          final minS = _minPossibleSum(count01!, count02!, count12!);
-                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
-                          if (target! < minS || target! > maxS) target = null;
-                        }
-                      });
-                    },
+                    label: '0/2 tiles',
+                    value: count02,
+                    items: count02Options,
+                    onChanged: (v) => setState(() => count02 = v),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _dropdown(
-                    label: 'Target (min total)',
+                    label: 'Target (≥)',
                     value: target,
-                    items: targets,
+                    items: targetOptions,
                     onChanged: (v) => setState(() => target = v),
                   ),
                 ),
               ],
             ),
+            const SizedBox(height: 12),
 
-            if (hintText.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(hintText, style: Theme.of(context).textTheme.bodySmall),
-              ),
-            ],
+            Row(
+              children: [
+                Expanded(
+                  child: _dropdown(
+                    label: '1/2 tiles (Light)',
+                    value: count12Light,
+                    items: count12LightOptions,
+                    onChanged: (v) => setState(() => count12Light = v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _dropdown(
+                    label: '1/2 tiles (Dark)',
+                    value: count12Dark,
+                    items: count12DarkOptions,
+                    onChanged: (v) => setState(() => count12Dark = v),
+                  ),
+                ),
+              ],
+            ),
 
-            const SizedBox(height: 18),
+            const SizedBox(height: 10),
+            Text(
+              'Possible total range: $minPossibleSum … $maxPossibleSum',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+
+            const SizedBox(height: 16),
 
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.assessment),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(statusText, style: Theme.of(context).textTheme.titleMedium)),
+                    Text('Probability of success', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text('${(p * 100).toStringAsFixed(2)}%', style: Theme.of(context).textTheme.displaySmall),
+                    const SizedBox(height: 6),
+                    Text('Success means total ≥ $target', style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
@@ -240,25 +205,33 @@ class _ProbHomeState extends State<ProbHome> {
 
             const Spacer(),
 
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Reset'),
-                onPressed: () {
-                  setState(() {
-                    count01 = null;
-                    count02 = null;
-                    count12 = null;
-                    target = null;
-                    probability = null;
-                  });
-                },
-              ),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  count02 = 0;
+                  count12Light = 0;
+                  count12Dark = 0;
+                  target = 1;
+                });
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reset'),
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _FixedChip extends StatelessWidget {
+  final String label;
+  final String valueText;
+
+  const _FixedChip({required this.label, required this.valueText});
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(avatar: const Icon(Icons.lock, size: 18), label: Text('$label: $valueText'));
   }
 }
