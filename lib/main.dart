@@ -13,6 +13,17 @@ class ProbApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.blue,
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          titleTextStyle: TextStyle(
+            fontFamily: 'Tangerine',
+            fontSize: 40,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.7,
+          ),
+        ),
         cardTheme: CardThemeData(color: Colors.white.withValues(alpha: 0.7)),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
@@ -106,7 +117,7 @@ class _ProbHomeState extends State<ProbHome> {
     final p = probability;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Runes Success Probability')),
+      appBar: AppBar(title: const Text('Runes Success Probability'), centerTitle: true),
       body: Stack(
         fit: StackFit.expand,
         children: [
