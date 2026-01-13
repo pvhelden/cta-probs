@@ -1,122 +1,264 @@
 import 'package:flutter/material.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+void main() => runApp(const ProbApp());
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ProbApp extends StatelessWidget {
+  const ProbApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Tile Success Probability',
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
+      home: const ProbHome(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class ProbHome extends StatefulWidget {
+  const ProbHome({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ProbHome> createState() => _ProbHomeState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _ProbHomeState extends State<ProbHome> {
+  // Dropdown ranges for counts. Adjust as you like.
+  static const int maxCount = 20;
+  final List<int> countOptions = List.generate(maxCount + 1, (i) => i); // 0..20
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  int? count01; // tiles that are 0 or 1
+  int? count02; // tiles that are 0 or 2
+  int? count12; // tiles that are 1 or 2
+  int? target; // minimum target
+
+  double? probability;
+
+  int _maxPossibleSum(int a, int b, int c) => a * 1 + b * 2 + c * 2;
+
+  int _minPossibleSum(int a, int b, int c) => a * 0 + b * 0 + c * 1;
+
+  List<int> _targetOptionsForCurrentCounts() {
+    if (count01 == null || count02 == null || count12 == null) {
+      // fallback range if not selected yet
+      return List.generate(41, (i) => i); // 0..40
+    }
+    final a = count01!, b = count02!, c = count12!;
+    final minS = _minPossibleSum(a, b, c);
+    final maxS = _maxPossibleSum(a, b, c);
+    return List.generate(maxS - minS + 1, (i) => minS + i);
+  }
+
+  void _recomputeIfReady() {
+    if (count01 == null || count02 == null || count12 == null || target == null) {
+      setState(() => probability = null);
+      return;
+    }
+
+    final a = count01!;
+    final b = count02!;
+    final c = count12!;
+    final t = target!;
+
+    final p = probabilityAtLeastTarget(count01: a, count02: b, count12: c, target: t);
+
+    setState(() => probability = p);
+  }
+
+  /// Exact probability that total >= target
+  /// Tiles are independent and each is 50/50 between its two outcomes:
+  /// - 0/1, 0/2, 1/2
+  double probabilityAtLeastTarget({
+    required int count01,
+    required int count02,
+    required int count12,
+    required int target,
+  }) {
+    // dp[sum] = probability of achieving exactly `sum`
+    List<double> dp = [1.0];
+
+    void convolveFairTwoPoint(int v1, int v2, int times) {
+      for (int k = 0; k < times; k++) {
+        final next = List<double>.filled(dp.length + v2, 0.0);
+        for (int s = 0; s < dp.length; s++) {
+          final p = dp[s];
+          next[s + v1] += 0.5 * p;
+          next[s + v2] += 0.5 * p;
+        }
+        dp = next;
+      }
+    }
+
+    // Add count01 tiles of {0,1}
+    convolveFairTwoPoint(0, 1, count01);
+    // Add count02 tiles of {0,2}
+    convolveFairTwoPoint(0, 2, count02);
+    // Add count12 tiles of {1,2}
+    convolveFairTwoPoint(1, 2, count12);
+
+    double success = 0.0;
+    for (int s = 0; s < dp.length; s++) {
+      if (s >= target) success += dp[s];
+    }
+    return success;
+  }
+
+  Widget _dropdown({
+    required String label,
+    required int? value,
+    required List<int> items,
+    required ValueChanged<int?> onChanged,
+  }) {
+    return DropdownButtonFormField<int>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      items: items.map((n) => DropdownMenuItem<int>(value: n, child: Text('$n'))).toList(),
+      onChanged: (v) {
+        onChanged(v);
+        _recomputeIfReady();
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final targets = _targetOptionsForCurrentCounts();
+
+    final statusText = () {
+      if (probability == null) return 'Select all 4 values to compute probability.';
+      return 'Probability of success: ${(probability! * 100).toStringAsFixed(2)}%';
+    }();
+
+    final hintText = () {
+      if (count01 == null || count02 == null || count12 == null) return '';
+      final a = count01!, b = count02!, c = count12!;
+      final minS = _minPossibleSum(a, b, c);
+      final maxS = _maxPossibleSum(a, b, c);
+      return 'Possible total range: $minS … $maxS';
+    }();
+
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      appBar: AppBar(title: const Text('Tile Success Probability')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _dropdown(
+                    label: 'Count of (0 or 1)',
+                    value: count01,
+                    items: countOptions,
+                    onChanged: (v) {
+                      setState(() {
+                        count01 = v;
+                        // If target becomes invalid, clear it.
+                        if (target != null && count01 != null && count02 != null && count12 != null) {
+                          final minS = _minPossibleSum(count01!, count02!, count12!);
+                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
+                          if (target! < minS || target! > maxS) target = null;
+                        }
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _dropdown(
+                    label: 'Count of (0 or 2)',
+                    value: count02,
+                    items: countOptions,
+                    onChanged: (v) {
+                      setState(() {
+                        count02 = v;
+                        if (target != null && count01 != null && count02 != null && count12 != null) {
+                          final minS = _minPossibleSum(count01!, count02!, count12!);
+                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
+                          if (target! < minS || target! > maxS) target = null;
+                        }
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _dropdown(
+                    label: 'Count of (1 or 2)',
+                    value: count12,
+                    items: countOptions,
+                    onChanged: (v) {
+                      setState(() {
+                        count12 = v;
+                        if (target != null && count01 != null && count02 != null && count12 != null) {
+                          final minS = _minPossibleSum(count01!, count02!, count12!);
+                          final maxS = _maxPossibleSum(count01!, count02!, count12!);
+                          if (target! < minS || target! > maxS) target = null;
+                        }
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _dropdown(
+                    label: 'Target (min total)',
+                    value: target,
+                    items: targets,
+                    onChanged: (v) => setState(() => target = v),
+                  ),
+                ),
+              ],
+            ),
+
+            if (hintText.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(hintText, style: Theme.of(context).textTheme.bodySmall),
+              ),
+            ],
+
+            const SizedBox(height: 18),
+
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.assessment),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(statusText, style: Theme.of(context).textTheme.titleMedium)),
+                  ],
+                ),
+              ),
+            ),
+
+            const Spacer(),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reset'),
+                onPressed: () {
+                  setState(() {
+                    count01 = null;
+                    count02 = null;
+                    count12 = null;
+                    target = null;
+                    probability = null;
+                  });
+                },
+              ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
